@@ -1,0 +1,5 @@
+Optimization	  Tokens/sec	    ms/step	      VRAM (MB)	     Speedup
+Baseline (FP32)	 "5,505 tok/s"	 372.02ms/step	"5,046MB VRAM"	  1.0x
+BF16				
+torch.compile				
+FlashAttention				
