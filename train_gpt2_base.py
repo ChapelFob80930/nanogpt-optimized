@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import time
+import mlflow
 
 class CausalAttention(nn.Module):
     
@@ -159,12 +160,12 @@ class GPT(nn.Module):
         model_hf = GPT2LMHeadModel.from_pretrained(model_type)
         sd_hf = model_hf.state_dict()
 
-        # copy while ensuring all of the parameters are aligned and match in names and shapes
+        # copy while ensuring all the parameters are aligned and match in names and shapes
         sd_keys_hf = sd_hf.keys()
         sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
         sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')] # same, just the mask (buffer)
         transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
-        # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
+        # basically the OpenAI checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
         # this means that we have to transpose these weights when we import them
         assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
         for k in sd_keys_hf:
@@ -224,6 +225,10 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 print(f"using device: {device}")
 
+mlflow.set_tracking_uri("http://100.83.87.55:5000")  # Pi over Tailscale
+mlflow.set_experiment("nanogpt-benchmarking")
+
+
 torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
@@ -231,7 +236,8 @@ if torch.cuda.is_available():
 train_loader = DataLoaderLite(B=4, T=512)
 
 # model = GPT.from_pretrained('gpt2')
-model = GPT(GPTConfig())
+config = GPTConfig()
+model = GPT(config)
 # model.eval() # put the model in inference mode
 model.to(device) # move the model to GPU for speed
 model.train()
@@ -239,36 +245,69 @@ model.train()
 # optimization
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
-# warmup
-for i in range(10):
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)
-    optimizer.zero_grad()
-    logits, loss = model(x, y)
-    loss.backward()
-    optimizer.step()
-    print(f"step {i}, loss: {loss.item()}")
+global_step = 0
 
-torch.cuda.synchronize()
-t0 = time.perf_counter()
+with mlflow.start_run(run_name="baseline-fp32"):
+    mlflow.log_params({
+        "precision": "fp32",
+        "B": train_loader.B,
+        "T": train_loader.T,
+        "n_layer": config.n_layer,
+        "n_head": config.n_head,
+        "n_embd": config.n_embd,
+        "block_size": config.block_size,
+        "vocab_size": config.vocab_size,
+        "lr": 3e-4,
+        "optimizer": "AdamW",
+        "device": device,
+    })
 
-for i in range(50):
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)
-    optimizer.zero_grad()
-    logits, loss = model(x, y)
-    loss.backward()
-    optimizer.step()
-    print(f"step {i}, loss: {loss.item()}")  
+    # warmup
+    for i in range(10):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        optimizer.zero_grad()
+        logits, loss = model(x, y)
+        loss.backward()
+        optimizer.step()
+        print(f"step {i}, loss: {loss.item()}")
+        mlflow.log_metric("train_loss", loss.item(), step=global_step)
+        global_step += 1
+
+    torch.cuda.synchronize()
+    t0 = time.perf_counter()
+
+    timed_losses = []
+
+    for i in range(50):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        optimizer.zero_grad()
+        logits, loss = model(x, y)
+        loss.backward()
+        optimizer.step()
+        print(f"step {i}, loss: {loss.item()}")
+        timed_losses.append(loss.item())
+        global_step += 1
     
-torch.cuda.synchronize()
-t1 = time.perf_counter()
+    torch.cuda.synchronize()
+    t1 = time.perf_counter()
 
-dt = (t1 - t0) / 50
-tokens_per_sec = (train_loader.B * train_loader.T) / dt
-vram = torch.cuda.max_memory_allocated() / 1e6
+    dt = (t1 - t0) / 50
+    tokens_per_sec = (train_loader.B * train_loader.T) / dt
+    vram = torch.cuda.max_memory_allocated() / 1e6
 
-print(f"baseline (FP32): {tokens_per_sec:.0f} tok/s | {dt*1000:.2f}ms/step | {vram:.0f}MB VRAM")
+    base_step = global_step - len(timed_losses)
+    for offset, loss_val in enumerate(timed_losses):
+        mlflow.log_metric("train_loss", loss_val, step=base_step + offset)
+
+    mlflow.log_metrics({
+        "tokens_per_sec": tokens_per_sec,
+        "ms_per_step": dt * 1000,
+        "vram_mb": vram,
+    })
+
+    print(f"baseline (FP32): {tokens_per_sec:.0f} tok/s | {dt*1000:.2f}ms/step | {vram:.0f}MB VRAM")
 
 import sys; sys.exit(0)
 
