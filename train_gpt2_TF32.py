@@ -251,9 +251,9 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
 global_step = 0
 
-with mlflow.start_run(run_name="bf16-autocast"):
+with mlflow.start_run(run_name="tf32-matmul"):
     mlflow.log_params({
-        "precision": "bf16",
+        "precision": "tf32",
         "B": train_loader.B,
         "T": train_loader.T,
         "n_layer": config.n_layer,
