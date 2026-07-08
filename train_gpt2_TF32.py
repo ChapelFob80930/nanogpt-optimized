@@ -238,6 +238,11 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
 train_loader = DataLoaderLite(B=4, T=512)
+# train_loader = DataLoaderLite(B=16, T=1024)
+
+torch.set_float32_matmul_precision('high')
+
+# print(torch.backends.cuda.matmul.allow_tf32)
 
 # model = GPT.from_pretrained('gpt2')
 config = GPTConfig()
@@ -251,7 +256,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
 global_step = 0
 
-with mlflow.start_run(run_name="tf32-matmul"):
+with mlflow.start_run(run_name="tf32-only"):
     mlflow.log_params({
         "precision": "tf32",
         "B": train_loader.B,
@@ -284,12 +289,17 @@ with mlflow.start_run(run_name="tf32-matmul"):
     timed_losses = []
 
     for i in range(50):
+        # t_0 = time.time()
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
         logits, loss = model(x, y)
         loss.backward()
         optimizer.step()
+        # torch.cuda.synchronize()
+        # t_1 = time.time()
+        # dt = (t_1-t_0)*1000 # time diff in milliseconds
+        # print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms")
         print(f"step {i}, loss: {loss.item()}")
         timed_losses.append(loss.item())
         global_step += 1
@@ -311,7 +321,7 @@ with mlflow.start_run(run_name="tf32-matmul"):
         "vram_mb": vram,
     })
 
-    print(f"baseline (FP32): {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
+    print(f"TF32: {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
 
 import sys;
 

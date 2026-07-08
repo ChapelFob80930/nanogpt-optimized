@@ -239,6 +239,8 @@ if torch.cuda.is_available():
 
 train_loader = DataLoaderLite(B=4, T=512)
 
+torch.set_float32_matmul_precision('high')
+
 # model = GPT.from_pretrained('gpt2')
 config = GPTConfig()
 model = GPT(config)
@@ -251,9 +253,9 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
 global_step = 0
 
-with mlflow.start_run(run_name="bf16-only"):
+with mlflow.start_run(run_name="bf16-tf32"):
     mlflow.log_params({
-        "precision": "bf16-only",
+        "precision": "bf16-tf32",
         "B": train_loader.B,
         "T": train_loader.T,
         "n_layer": config.n_layer,
@@ -313,7 +315,7 @@ with mlflow.start_run(run_name="bf16-only"):
         "vram_mb": vram,
     })
 
-    print(f"BF16-only: {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
+    print(f"BF16-TF32: {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
 
 import sys; sys.exit(0)
 
