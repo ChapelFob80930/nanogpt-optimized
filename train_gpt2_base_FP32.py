@@ -5,12 +5,13 @@ import torch.nn as nn
 from torch.nn import functional as F
 import time
 import mlflow
+import platform; is_wsl = "microsoft" in platform.uname().release.lower()
 
 class CausalAttention(nn.Module):
-    
+
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0 
+        assert config.n_embd % config.n_head == 0
         #key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         #output projection
@@ -21,7 +22,7 @@ class CausalAttention(nn.Module):
         self.n_embd = config.n_embd
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                     .view(1, 1, config.block_size, config.block_size))
-        
+
     def forward(self, x):
         B, T, C = x.size() #batch size, sequence length, embedding dimensionality (n_embd)
         # calculate query, key, values for all heads in batch and move head forward to be the batch dimension
@@ -41,33 +42,33 @@ class CausalAttention(nn.Module):
         # output projection
         y = self.c_proj(y)
         return y
-        
+
 
 class MLP(nn.Module):
-    
+
     def __init__(self, config):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
         self.c_proj.NANOGPT_SCALE_INIT = 1
-    
+
     def forward(self, x):
         x = self.c_fc(x)
         x = self.gelu(x) #Gaussian Error Linear Unit (GELU) activation function
         x = self.c_proj(x)
         return x
-    
+
 
 class Block(nn.Module):
-    
+
     def __init__(self, config):
         super().__init__()
         self.ln_1 = nn.LayerNorm(config.n_embd)
         self.attn = CausalAttention(config)
         self.ln_2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
-        
+
     def forward(self, x):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
@@ -82,11 +83,11 @@ class GPTConfig:
     n_embd: int = 768 # embedding dimensionality
 
 class GPT(nn.Module):
-    
+
     def __init__(self, config):
         super().__init__()
         self.config = config
-        
+
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
@@ -94,13 +95,13 @@ class GPT(nn.Module):
             ln_f = nn.LayerNorm(config.n_embd),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        
+
         # weight sharing scheme
         self.transformer.wte.weight = self.lm_head.weight
-        
+
         # init params
         self.apply(self._init_weights)
-    
+
     def _init_weights(self, module):
         std = 0.02
         if isinstance(module, nn.Linear):
@@ -110,11 +111,11 @@ class GPT(nn.Module):
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean = 0.0, std = std)                
-                    
+            torch.nn.init.normal_(module.weight, mean = 0.0, std = std)
+
     def forward(self, idx, targets=None):
         B,T = idx.size()
-        
+
         assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
         # forward the token and position embeddings
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device) # shape (T)
@@ -130,7 +131,7 @@ class GPT(nn.Module):
         loss = None
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-            
+
         return logits, loss
 
     @classmethod
@@ -181,8 +182,8 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
-    
-    
+
+
 num_return_sequences = 5
 max_length = 30
 
@@ -204,7 +205,7 @@ class DataLoaderLite:
 
         #state
         self.current_position = 0
-        
+
     def next_batch(self):
         B, T = self.B, self.T
         buf = self.tokens[self.current_position : self.current_position+B*T+1]
@@ -260,6 +261,7 @@ with mlflow.start_run(run_name="baseline-fp32"):
         "lr": 3e-4,
         "optimizer": "AdamW",
         "device": device,
+        "wsl": is_wsl,
     })
 
     # warmup
@@ -289,7 +291,7 @@ with mlflow.start_run(run_name="baseline-fp32"):
         print(f"step {i}, loss: {loss.item()}")
         timed_losses.append(loss.item())
         global_step += 1
-    
+
     torch.cuda.synchronize()
     t1 = time.perf_counter()
 
@@ -347,4 +349,3 @@ x = tokens.to(device)
 #     tokens = x[i, :max_length].tolist()
 #     decoded = enc.decode(tokens)
 #     print(">", decoded)
-        

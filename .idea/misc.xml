@@ -3,4 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="llm-gpu" />
   </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="llm-gpu" project-jdk-type="Python SDK" />
 </project>

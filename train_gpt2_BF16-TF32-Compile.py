@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import time
 import mlflow
-
+import platform; is_wsl = "microsoft" in platform.uname().release.lower()
 
 class CausalAttention(nn.Module):
 
@@ -246,7 +246,7 @@ config = GPTConfig()
 model = GPT(config)
 # model.eval() # put the model in inference mode
 model.to(device)  # move the model to GPU for speed
-model.train()
+model = torch.compile(model)
 
 # optimization
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -267,6 +267,7 @@ with mlflow.start_run(run_name="bf16-tf32-compile"):
         "lr": 3e-4,
         "optimizer": "AdamW",
         "device": device,
+        "wsl": is_wsl,
     })
 
     # warmup
@@ -316,7 +317,7 @@ with mlflow.start_run(run_name="bf16-tf32-compile"):
         "vram_mb": vram,
     })
 
-    print(f"BF16-TF32: {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
+    print(f"BF16-TF32-Compile: {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
 
 import sys; sys.exit(0)
 

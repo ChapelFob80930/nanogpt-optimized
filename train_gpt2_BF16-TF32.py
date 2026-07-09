@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import time
 import mlflow
-
+import platform; is_wsl = "microsoft" in platform.uname().release.lower()
 
 class CausalAttention(nn.Module):
 
@@ -266,6 +266,7 @@ with mlflow.start_run(run_name="bf16-tf32"):
         "lr": 3e-4,
         "optimizer": "AdamW",
         "device": device,
+        "wsl": is_wsl,
     })
 
     # warmup
