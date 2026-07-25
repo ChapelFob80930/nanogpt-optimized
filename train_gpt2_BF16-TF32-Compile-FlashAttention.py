@@ -34,10 +34,14 @@ class CausalAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
         # attention (materializes the large (T,T) matrix for all the queries and keys)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
-        att = F.softmax(att, dim=-1)
-        y = att @ v  # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, hs)
+
+        # att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        # att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
+        # att = F.softmax(att, dim=-1)
+        # y = att @ v  # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, hs)
+
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
         y = y.transpose(1, 2).contiguous().view(B, T, C)  # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
@@ -248,17 +252,16 @@ model = GPT(config)
 model.to(device)  # move the model to GPU for speed
 model = torch.compile(model)
 model.train()
-
 # optimization
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
 global_step = 0
 
-with mlflow.start_run(run_name="bf16-tf32-compile"):
+with mlflow.start_run(run_name="bf16-tf32-compile-flashAttention"):
     mlflow.log_params({
         "precision": "bf16-tf32",
         "compiled": True,
-        "flashAttention": False,
+        "flashAttention" : True,
         "B": train_loader.B,
         "T": train_loader.T,
         "n_layer": config.n_layer,
@@ -320,7 +323,7 @@ with mlflow.start_run(run_name="bf16-tf32-compile"):
         "vram_mb": vram,
     })
 
-    print(f"BF16-TF32-Compile: {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
+    print(f"BF16-TF32-Compile-FlashAttention: {tokens_per_sec:.0f} tok/s | {dt * 1000:.2f}ms/step | {vram:.0f}MB VRAM")
 
 import sys; sys.exit(0)
 

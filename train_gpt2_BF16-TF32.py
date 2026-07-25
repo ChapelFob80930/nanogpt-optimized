@@ -256,6 +256,8 @@ global_step = 0
 with mlflow.start_run(run_name="bf16-tf32"):
     mlflow.log_params({
         "precision": "bf16-tf32",
+        "compiled": False,
+        "flashAttention": False,
         "B": train_loader.B,
         "T": train_loader.T,
         "n_layer": config.n_layer,
@@ -282,6 +284,7 @@ with mlflow.start_run(run_name="bf16-tf32"):
         mlflow.log_metric("train_loss", loss.item(), step=global_step)
         global_step += 1
 
+    torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     t0 = time.perf_counter()
 
