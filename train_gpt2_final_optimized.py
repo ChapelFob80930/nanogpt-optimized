@@ -379,7 +379,7 @@ with mlflow.start_run(run_name="nanogpt-final-optimized"):
             param_group['lr'] = lr
         optimizer.step()
         print(f"step {step} | loss: {loss_accum.item():.6f} | lr: {lr:.4e} | grad_norm: {norm.item():.4f}")
-        timed_losses.append(loss.item())
+        timed_losses.append(loss_accum.item())
         global_step += 1
 
     torch.cuda.synchronize()
